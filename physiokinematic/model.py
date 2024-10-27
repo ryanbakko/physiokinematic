@@ -41,17 +41,23 @@ def model(data):
             Dataset
     """
     # line width in kHz
-    data = data.assign(fwhm_kHz=1000.0 * data["line_freq"] * data["fwhm"] / c.c.to("km/s").value)
+    data = data.assign(
+        fwhm_kHz=1000.0 * data["line_freq"] * data["fwhm"] / c.c.to("km/s").value
+    )
 
     with pm.Model(coords={"data": data.index, "kdar": ["N", "F"]}) as model:
         # Galactocentric radius
         Rmin = utils.__R0 * np.abs(np.sin(np.deg2rad(data["glong"])))
-        Rmin = pt.switch(pt.lt(np.cos(np.deg2rad(data["glong"])), 0.0), utils.__R0, Rmin)
+        Rmin = pt.switch(
+            pt.lt(np.cos(np.deg2rad(data["glong"])), 0.0), utils.__R0, Rmin
+        )
         Rgal_offset = pm.HalfNormal("Rgal_offset", sigma=10.0, dims="data")
         Rgal = pm.Deterministic("Rgal", Rmin + Rgal_offset, dims="data")
 
         # LSR velocity (km/s)
-        vlsr = utils.reid19_vlsr(data["glong"].to_numpy(), data["glat"].to_numpy(), Rgal)
+        vlsr = utils.reid19_vlsr(
+            data["glong"].to_numpy(), data["glat"].to_numpy(), Rgal
+        )
         _ = pm.Normal(
             "vlsr",
             mu=vlsr,
@@ -63,18 +69,43 @@ def model(data):
         # Electron temperature (K)
         log10_te = pm.Normal("log10_te", mu=3.5, sigma=0.5, dims="data")
         te = 10.0**log10_te
-        _ = pm.Normal("te", mu=te, sigma=data["e_te"].to_numpy(), observed=data["te"].to_numpy(), dims="data")
-
-        # distance (kpc)
-        distance_near, distance_far = utils.distance(data["glong"].to_numpy(), data["glat"].to_numpy(), Rgal)
-        distance = pm.Deterministic(
-            "distance",
-            pt.stack([distance_near, distance_far], axis=-1),
-            dims=["data", "kdar"],
+        _ = pm.Normal(
+            "te",
+            mu=te,
+            sigma=data["e_te"].to_numpy(),
+            observed=data["te"].to_numpy(),
+            dims="data",
         )
 
+        # NEW: Example means and standard deviations for d_near and d_far
+        some_mean_near = 5.0  # Replace with appropriate values
+        some_sigma_near = 1.0
+        some_mean_far = 10.0  # Replace with appropriate values
+        some_sigma_far = 2.0
+
+        # Define near and far distance parameters
+        d_near = pm.Normal("d_near", mu=some_mean_near, sigma=some_sigma_near)
+        d_far = pm.Normal("d_far", mu=some_mean_far, sigma=some_sigma_far)
+
+        # Introduce a latent variable (kdar) for selecting between near and far
+        kdar = pm.Categorical("kdar", p=[0.5, 0.5])  # Assuming equal prior probability
+
+        # Define 'distance' as a free parameter that can switch between d_near and d_far
+        distance = pm.math.switch(pm.math.eq(kdar, 0), d_near, d_far)
+
+        # Use 'distance' in further modeling as required
+        # Example usage in the model could look like this:
+        likelihood = pm.Normal(
+            "likelihood", mu=distance, sigma=1.0, observed=np.random.randn(100)
+        )
+
+        # Sampling or further analysis
+        trace = pm.sample(1000, return_inferencedata=True)
+
         # KDAR
-        kdar_w = pm.Dirichlet("kdar_w", a=np.ones((len(data), 2)), dims=["data", "kdar"])
+        kdar_w = pm.Dirichlet(
+            "kdar_w", a=np.ones((len(data), 2)), dims=["data", "kdar"]
+        )
 
         # Ionizing photon rate
         log10_q = pm.Normal("log10_q", mu=48.5, sigma=0.75, dims=["data", "kdar"])
@@ -114,7 +145,10 @@ def model(data):
         # line brightness
         tau_line = pm.Deterministic(
             "tau_line",
-            1.92e3 * te[:, None] ** -2.5 * 10.0**log10_em / data["fwhm_kHz"].to_numpy()[:, None],
+            1.92e3
+            * te[:, None] ** -2.5
+            * 10.0**log10_em
+            / data["fwhm_kHz"].to_numpy()[:, None],
             dims=["data", "kdar"],
         )
         line_mu = (
@@ -145,3 +179,14 @@ def model(data):
             dims="data",
         )
     return model
+
+
+"""
+        # distance (kpc)
+        distance_near, distance_far = utils.distance(data["glong"].to_numpy(), data["glat"].to_numpy(), Rgal)
+        distance = pm.Deterministic(
+            "distance",
+            pt.stack([distance_near, distance_far], axis=-1),
+            dims=["data", "kdar"],
+        )
+"""
