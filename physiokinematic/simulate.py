@@ -57,7 +57,7 @@ def simulate(num, seed=1234):
     glat = np.rad2deg(np.arcsin(Zg / distance))  # deg
 
     # LSR velocity (km/s)
-    vlsr = utils.reid19_vlsr(glong, glat, R).eval()
+    vlsr = utils.reid19_vlsr(glong, glat, R)
     e_vlsr = 1.0
     vlsr += rng.normal(0.0, e_vlsr, num)
 
@@ -86,7 +86,7 @@ def simulate(num, seed=1234):
     line_freq = 8000.0  # MHz
     nonthermal_fwhm = 15.0 * u.km / u.s
     thermal_fwhm = 2.0 * np.sqrt(2.0 * np.log(2.0)) * np.sqrt(c.k_B * te * u.K / c.m_p)
-    fwhm = nonthermal_fwhm + thermal_fwhm
+    fwhm = np.sqrt(nonthermal_fwhm**2.0 + thermal_fwhm**2.0)
     fwhm_kHz = ((fwhm / c.c) * line_freq * u.MHz).to("kHz").value
 
     # Line opacity and emission

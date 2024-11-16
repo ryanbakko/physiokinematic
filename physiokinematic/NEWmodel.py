@@ -119,19 +119,16 @@ def model(data):
         # line brightness
         tau_line = pm.Deterministic(
             "tau_line",
-            1.92e3
-            * te[:, None] ** -2.5
-            * 10.0**log10_em
-            / data["fwhm_kHz"].to_numpy()[:, None],
+            1.92e3 * te**-2.5 * 10.0**log10_em / data["fwhm_kHz"].to_numpy(),
             dims=["data"],
         )
         line_mu = (
             2.0
-            * data["beam_area"].to_numpy()[:, None]
+            * data["beam_area"].to_numpy()
             / 206265.0**2.0
             * (c.k_B / c.c**2.0).to("mJy MHz-2 K-1").value
-            * data["line_freq"].to_numpy()[:, None] ** 2.0
-            * te[:, None]
+            * data["line_freq"].to_numpy() ** 2.0
+            * te
             * (1.0 - np.exp(-tau_line))
         )  # mJy/beam
 
@@ -144,7 +141,7 @@ def model(data):
             line_mu * beam_dilution,
             dims=["data"],
         )
-        _ = pm.NormalMixture(
+        _ = pm.Normal(
             "line",
             mu=line_mu,
             sigma=data["e_line"].to_numpy(),
@@ -152,148 +149,3 @@ def model(data):
             dims="data",
         )
     return model
-
-
-# 11/2/24 additions
-import pandas as pd
-import matplotlib.pyplot as plt
-
-
-def simulate_hii_regions(num_regions=100, seed=42):
-    """
-    Simulates HII regions with random data.
-
-    Parameters:
-        num_regions (int): Number of HII regions to simulate.
-        seed (int): Random seed for reproducibility.
-
-    Returns:
-        pd.DataFrame: DataFrame containing simulated HII region data.
-    """
-    np.random.seed(seed)  # For reproducibility
-    gal_longitude = np.random.uniform(
-        0, 360, num_regions
-    )  # Galactic longitude in degrees
-    gal_latitude = np.random.uniform(
-        -90, 90, num_regions
-    )  # Galactic latitude in degrees
-    velocity = np.random.uniform(-250, 250, num_regions)  # Velocity in km/s
-    apparent_size = np.random.uniform(1, 20, num_regions)  # Apparent size in arcmin
-    absolute_size = np.random.uniform(10, 100, num_regions)  # Absolute size in parsecs
-
-    # Creating a DataFrame to hold the simulated data
-    hii_data = pd.DataFrame(
-        {
-            "Gal_Longitude": gal_longitude,
-            "Gal_Latitude": gal_latitude,
-            "Velocity": velocity,
-            "Apparent_Size": apparent_size,
-            "Absolute_Size": absolute_size,
-        }
-    )
-
-    return hii_data
-
-
-def plot_galaxy_map(hii_data):
-    """
-    Plots a map of the simulated HII regions in the galaxy.
-
-    Parameters:
-        hii_data (pd.DataFrame): DataFrame containing HII region data.
-    """
-    plt.figure(figsize=(10, 6))
-    plt.scatter(
-        hii_data["Gal_Longitude"],
-        hii_data["Gal_Latitude"],
-        s=hii_data["Apparent_Size"],
-        alpha=0.7,
-        marker="o",
-    )
-    plt.xlabel("Galactic Longitude (degrees)")
-    plt.ylabel("Galactic Latitude (degrees)")
-    plt.title(
-        "Map of the Galaxy with Simulated HII Regions (Apparent Size Proportional)"
-    )
-    plt.grid(True)
-    plt.show()
-
-
-# Usage example
-hii_data = simulate_hii_regions(num_regions=100)  # Step 1: Simulate HII regions
-plot_galaxy_map(hii_data)  # Step 2: Plot the galaxy map
-
-
-def plot_longitude_velocity_diagram(hii_data):
-    """
-    Plots a Longitude-Velocity (L-V) diagram of the simulated HII regions.
-
-    Parameters:
-        hii_data (pd.DataFrame): DataFrame containing HII region data.
-    """
-    plt.figure(figsize=(10, 6))
-    plt.scatter(
-        hii_data["Gal_Longitude"],
-        hii_data["Velocity"],
-        s=hii_data["Absolute_Size"],
-        alpha=0.7,
-        marker="o",
-    )
-    plt.xlabel("Galactic Longitude (degrees)")
-    plt.ylabel("Velocity (km/s)")
-    plt.title("Longitude-Velocity Diagram (Absolute Size Proportional)")
-    plt.grid(True)
-    plt.show()
-
-
-# Usage example
-plot_longitude_velocity_diagram(hii_data)  # Step 3: Plot the Longitude-Velocity diagram
-
-
-def simulate_te_vs_rgal(
-    num_regions=100, te_slope=50, te_intercept=1000, noise_level=100, seed=42
-):
-    """
-    Simulates a positive linear relationship between electron temperature (Te) and Galactic radius (Rgal).
-
-    Parameters:
-        num_regions (int): Number of HII regions to simulate.
-        te_slope (float): Slope for the Te vs Rgal linear relationship.
-        te_intercept (float): Intercept for the Te vs Rgal relationship.
-        noise_level (float): Standard deviation of Gaussian noise to add to the Te values.
-        seed (int): Random seed for reproducibility.
-
-    Returns:
-        pd.DataFrame: DataFrame containing simulated Rgal and Te data.
-    """
-    np.random.seed(seed)  # For reproducibility
-    rgal = np.random.uniform(0, 15, num_regions)  # Simulated Galactic radius in kpc
-    te = (
-        te_slope * rgal + te_intercept + np.random.normal(0, noise_level, num_regions)
-    )  # Linear Te with noise
-
-    # Creating a DataFrame to hold the simulated data
-    te_rgal_data = pd.DataFrame({"Rgal": rgal, "Te": te})
-
-    return te_rgal_data
-
-
-def plot_te_vs_rgal(te_rgal_data):
-    """
-    Plots a Te vs. Rgal figure showing a positive linear relationship.
-
-    Parameters:
-        te_rgal_data (pd.DataFrame): DataFrame containing Te and Rgal data.
-    """
-    plt.figure(figsize=(10, 6))
-    plt.scatter(te_rgal_data["Rgal"], te_rgal_data["Te"], alpha=0.7, marker="o")
-    plt.xlabel("Galactic Radius (Rgal) [kpc]")
-    plt.ylabel("Electron Temperature (Te) [K]")
-    plt.title("Te vs. Rgal: Positive Linear Relationship")
-    plt.grid(True)
-    plt.show()
-
-
-# Usage example
-te_rgal_data = simulate_te_vs_rgal(num_regions=100)  # Simulate Te vs Rgal data
-plot_te_vs_rgal(te_rgal_data)  # Step 5: Plot the Te vs Rgal figure
