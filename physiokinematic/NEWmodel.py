@@ -45,8 +45,16 @@ def model(data):
         fwhm_kHz=1000.0 * data["line_freq"] * data["fwhm"] / c.c.to("km/s").value
     )
 
+    # Make the model dependent on galactic longitude
     with pm.Model(coords={"data": data.index}) as model:
-        distance = pm.HalfNormal("distance", sigma=5.0, dims="data")
+        # Make the model dependent on galactic longitude
+        galactic_longitude = np.deg2rad(data["glong"])
+        R_sigma = 5  # kpc
+        # Incorporate the galactic longitude into the model
+        dist_sigma = utils.__R0 * np.cos(galactic_longitude) + np.sqrt(
+            utils.__R0**2 * np.sin(galactic_longitude) ** 2 + R_sigma**2
+        )
+        distance = pm.HalfNormal("distance", sigma=dist_sigma, dims="data")
 
         # Galactocentric radius
         Rgal = pm.Deterministic(
@@ -71,8 +79,8 @@ def model(data):
             dims="data",
         )
 
-        # Electron temperature (K)
-        log10_te = pm.Normal("log10_te", mu=3.5, sigma=0.5, dims="data")
+        # Electron temperature (K)- CHANGED SIGMA
+        log10_te = pm.Normal("log10_te", mu=3.5, sigma=0.1, dims="data")
         te = 10.0**log10_te
         _ = pm.Normal(
             "te",
