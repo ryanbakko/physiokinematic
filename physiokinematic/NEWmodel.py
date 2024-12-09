@@ -51,7 +51,7 @@ def model(data):
         galactic_longitude = np.deg2rad(data["glong"])
         R_sigma = 5  # kpc
         # Incorporate the galactic longitude into the model
-        dist_sigma = utils.__R0 * np.cos(galactic_longitude) + np.sqrt(
+        dist_sigma = utils.__R0 * np.abs(np.cos(galactic_longitude)) + np.sqrt(
             utils.__R0**2 * np.sin(galactic_longitude) ** 2 + R_sigma**2
         )
         distance = pm.HalfNormal("distance", sigma=dist_sigma, dims="data")
