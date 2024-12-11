@@ -22,7 +22,6 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 """
 
 import numpy as np
-import pytensor.tensor as pt
 
 # Reid+2019 A5 rotation model parameters
 __R0 = 8.166  # kpc
@@ -57,12 +56,14 @@ def reid19_theta(R, R0=__R0, a2=__a2, a3=__a3):
     """
     rho = R / (a2 * R0)
     lam = (a3 / 1.5) ** 5.0
-    loglam = pt.log10(lam)
+    loglam = np.log10(lam)
     term1 = 200.0 * lam**0.41
-    term2 = pt.sqrt(0.8 + 0.49 * loglam + 0.75 * pt.exp(-0.4 * lam) / (0.47 + 2.25 * lam**0.4))
+    term2 = np.sqrt(
+        0.8 + 0.49 * loglam + 0.75 * np.exp(-0.4 * lam) / (0.47 + 2.25 * lam**0.4)
+    )
     term3 = (0.72 + 0.44 * loglam) * 1.97 * rho**1.22 / (rho**2.0 + 0.61) ** 1.43
-    term4 = 1.6 * pt.exp(-0.4 * lam) * rho**2.0 / (rho**2.0 + 2.25 * lam**0.4)
-    theta = term1 / term2 * pt.sqrt(term3 + term4)
+    term4 = 1.6 * np.exp(-0.4 * lam) * rho**2.0 / (rho**2.0 + 2.25 * lam**0.4)
+    theta = term1 / term2 * np.sqrt(term3 + term4)
     return theta
 
 
@@ -102,14 +103,14 @@ def reid19_vlsr(
     theta0 = reid19_theta(R0, R0=R0, a2=a2, a3=a3)
 
     # Radial velocity relative to LSR
-    sin_glong = pt.sin(np.deg2rad(glong))
-    cos_glat = pt.cos(np.deg2rad(glat))
+    sin_glong = np.sin(np.deg2rad(glong))
+    cos_glat = np.cos(np.deg2rad(glat))
     vlsr = R0 * sin_glong * cos_glat * (theta / R - theta0 / R0)
 
     # Difference between solar motion and IAU definition
-    U = (__Ustd - Usun) * pt.cos(np.deg2rad(glong))
+    U = (__Ustd - Usun) * np.cos(np.deg2rad(glong))
     V = (__Vstd - Vsun) * sin_glong
-    W = (__Wstd - Wsun) * pt.sin(np.deg2rad(glat))
+    W = (__Wstd - Wsun) * np.sin(np.deg2rad(glat))
     return vlsr + (U + V) * cos_glat + W
 
 
@@ -132,14 +133,14 @@ def distance(glong, glat, Rgal, R0=__R0):
             Both distances are nan if line of sight never crosses Rgal.
     """
     glong_rad = np.deg2rad(glong)
-    cos_glat = pt.cos(np.deg2rad(glat))
+    cos_glat = np.cos(np.deg2rad(glat))
 
     # tangent point distance and Rgal
-    Rtp = R0 * pt.abs(pt.sin(glong_rad))
-    dtp = R0 * pt.cos(glong_rad)
+    Rtp = R0 * np.abs(np.sin(glong_rad))
+    dtp = R0 * np.cos(glong_rad)
 
     # midplane distance
-    d_near = dtp - pt.sqrt(Rgal**2.0 - Rtp**2.0)
-    d_far = dtp + pt.sqrt(Rgal**2.0 - Rtp**2.0)
+    d_near = dtp - np.sqrt(Rgal**2.0 - Rtp**2.0)
+    d_far = dtp + np.sqrt(Rgal**2.0 - Rtp**2.0)
 
     return d_near / cos_glat, d_far / cos_glat
