@@ -47,6 +47,17 @@ def model(data):
 
     # Make the model dependent on galactic longitude
     with pm.Model(coords={"data": data.index}) as model:
+        # Kinematic distance ambiuity resolution
+        prob_far = np.ones(len(data)) * 0.5
+        prob_far[(data["glong"] > 90.0) * (data["glong"] < 270.0)] = 1.0
+        prob_near = 1.0 - prob_far
+        kdar_near = pm.Categorical(
+            "kdar_near", p=np.stack([prob_near, prob_far]), dims="data"
+        )
+
+        # Distance to tangent point
+        distance_tp = utils.__R0 * np.abs(np.cos(galactic_longitude))
+
         # Make the model dependent on galactic longitude
         galactic_longitude = np.deg2rad(data["glong"])
         R_sigma = 5  # kpc
@@ -54,7 +65,20 @@ def model(data):
         dist_sigma = utils.__R0 * np.abs(np.cos(galactic_longitude)) + np.sqrt(
             utils.__R0**2 * np.sin(galactic_longitude) ** 2 + R_sigma**2
         )
-        distance = pm.HalfNormal("distance", sigma=dist_sigma, dims="data")
+
+        lower_distance = np.zeros(len(data))
+        lower_distance
+
+        distance = pm.Truncated(
+            "distance",
+            pm.HalfNormal.dist(sigma=dist_sigma),
+            lower=lower_distance,
+            upper=upper_distnace,
+            dims="data",
+        )
+        distance = pt.swtich(
+            kdar_near,
+        )
 
         # Galactocentric radius
         Rgal = pm.Deterministic(
