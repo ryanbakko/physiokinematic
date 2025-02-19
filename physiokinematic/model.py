@@ -59,6 +59,7 @@ def model(data):
         d_near = utils.__R0 * np.cos(np.deg2rad(data["glong"])) - np.sqrt(
             Rgal**2 - utils.__R0**2 * np.sin(np.deg2rad(data["glong"])) ** 2
         )
+        d_near = pt.switch(pt.le(d_near, 0.0), 0.001, d_near)
         d_far = utils.__R0 * np.cos(np.deg2rad(data["glong"])) + np.sqrt(
             Rgal**2 - utils.__R0**2 * np.sin(np.deg2rad(data["glong"])) ** 2
         )
