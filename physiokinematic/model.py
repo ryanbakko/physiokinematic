@@ -1,9 +1,10 @@
 """
 model.py
-Forward model HII region distances and physical properties.
+Forward model HII region distance and physical properties.
 
-Copyright(C) 2023 by
+Copyright(C) 2023-2025 by
 Trey V. Wenger; tvwenger@gmail.com
+Ryan Bakko
 
 GNU General Public License v3 (GNU GPLv3)
 
@@ -19,9 +20,6 @@ GNU General Public License for more details.
 
 You should have received a copy of the GNU General Public License
 along with this program.  If not, see <http://www.gnu.org/licenses/>.
-
-TODO: can we perform a similar analysis on HII region candidates since they
-are constrained by the size?
 """
 
 import pymc as pm
@@ -29,164 +27,145 @@ import pytensor.tensor as pt
 import numpy as np
 import astropy.constants as c
 
-from physiokinematic import utils, simulate, loader
+from physiokinematic import utils
 
 
 def model(data):
     """
-    Generates an instance of the forward model applied to a given dataset.
+    Generates an instance of the forward model applied to a given data point.
 
     Inputs:
-        data :: pd.DataFrame
-            Dataset
+        data :: pd.Series
+            Data for a single HII region
     """
-    # line width in kHz
-    data = data.assign(
-        fwhm_kHz=1000.0 * data["line_freq"] * data["fwhm"] / c.c.to("km/s").value
-    )
+    # Quadrant 3 or 4
+    is_q3_q4 = np.cos(np.deg2rad(data["glong"])) < 0.0
 
-    with pm.Model(coords={"data": data.index, "kdar": ["N", "F"]}) as model:
-        # Galactocentric radius
+    # Outer galaxy
+    sin_glong = np.sin(np.deg2rad(data["glong"]))
+    is_outer_galaxy = is_q3_q4 or np.sign(sin_glong) != np.sign(data["vlsr"])
+    kdar = ["F"] if is_outer_galaxy else ["F", "N"]
+
+    # line width in kHz
+    data["fwhm_kHz"] = 1000.0 * data["line_freq"] * data["fwhm"] / c.c.to("km/s").value
+
+    with pm.Model(coords={"kdar": kdar}) as model:
+        # Kinematic distance ambiguity
+        if is_outer_galaxy:
+            kdar_w = np.array([1.0])
+        else:
+            kdar_w = pm.Dirichlet("kdar_w", a=[0.5, 0.5], dims="kdar")
+
+        # Galactocentric radius (kpc)
+        Rsigma = 10.0
         Rmin = utils.__R0 * np.abs(np.sin(np.deg2rad(data["glong"])))
-        Rmin = pt.switch(
-            pt.lt(np.cos(np.deg2rad(data["glong"])), 0.0), utils.__R0, Rmin
-        )
-        Rgal_offset = pm.HalfNormal("Rgal_offset", sigma=10.0, dims="data")
-        Rgal = pm.Deterministic("Rgal", Rmin + Rgal_offset, dims="data")
+        Rmin_far = utils.__R0 if is_q3_q4 else Rmin
+        Rmax_far = 35.0  # kpc
+        if is_outer_galaxy:
+            Rgal = pm.TruncatedNormal(
+                "Rgal", mu=0.0, sigma=Rsigma, lower=Rmin_far, upper=Rmax_far, dims="kdar"
+            )
+        else:
+            Rmin_near = Rmin
+            Rmax_near = utils.__R0
+            Rgal = pm.TruncatedNormal(
+                "Rgal",
+                mu=0.0,
+                sigma=Rsigma,
+                lower=[Rmin_far, Rmin_near],
+                upper=[Rmax_far, Rmax_near],
+                dims="kdar",
+            )
+
+        # Distance (kpc)
+        Rtan = utils.__R0 * np.cos(np.deg2rad(data["glong"]))
+        Rdiff = np.sqrt(Rgal**2 - Rmin**2)
+        d_far = Rtan + Rdiff[0]
+        if is_outer_galaxy:
+            distance = pm.Deterministic("distance", pt.stack([d_far]), dims="kdar")
+        else:
+            d_near = Rtan - Rdiff[1]
+            distance = pm.Deterministic(
+                "distance", pt.stack([d_far, d_near]), dims="kdar"
+            )
 
         # LSR velocity (km/s)
-        vlsr = utils.reid19_vlsr(
-            data["glong"].to_numpy(), data["glat"].to_numpy(), Rgal
-        )
-        _ = pm.Normal(
+        vlsr = utils.reid19_vlsr(data["glong"], data["glat"], Rgal)
+        _ = pm.NormalMixture(
             "vlsr",
             mu=vlsr,
-            sigma=data["e_vlsr"].to_numpy(),
-            observed=data["vlsr"].to_numpy(),
-            dims="data",
+            sigma=data["e_vlsr"],
+            w=kdar_w,
+            observed=data["vlsr"],
         )
 
         # Electron temperature (K)
-        log10_te = pm.Normal("log10_te", mu=3.5, sigma=0.5, dims="data")
+        log10_te = pm.Normal("log10_te", mu=3.5, sigma=0.5)
         te = 10.0**log10_te
-        _ = pm.Normal(
-            "te",
-            mu=te,
-            sigma=data["e_te"].to_numpy(),
-            observed=data["te"].to_numpy(),
-            dims="data",
-        )
+        if not np.isnan(data["te"]):
+            _ = pm.Normal(
+                "te",
+                mu=te,
+                sigma=data["e_te"],
+                observed=data["te"],
+            )
 
-        # NEW: Example means and standard deviations for d_near and d_far
-        some_mean_near = 5.0  # Replace with appropriate values
-        some_sigma_near = 1.0
-        some_mean_far = 10.0  # Replace with appropriate values
-        some_sigma_far = 2.0
+        # Emission measure (pc cm-6)
+        log10_em = pm.Normal("log10_em", mu=4.0, sigma=1.0, dims="kdar")
 
-        # Define near and far distance parameters
-        d_near = pm.Normal("d_near", mu=some_mean_near, sigma=some_sigma_near)
-        d_far = pm.Normal("d_far", mu=some_mean_far, sigma=some_sigma_far)
-
-        # Introduce a latent variable (kdar) for selecting between near and far
-        kdar = pm.Categorical("kdar", p=[0.5, 0.5])  # Assuming equal prior probability
-
-        # Define 'distance' as a free parameter that can switch between d_near and d_far
-        distance = pm.math.switch(pm.math.eq(kdar, 0), d_near, d_far)
-
-        # Use 'distance' in further modeling as required
-        # Example usage in the model could look like this:
-        likelihood = pm.Normal(
-            "likelihood", mu=distance, sigma=1.0, observed=np.random.randn(100)
-        )
-
-        # Sampling or further analysis
-        trace = pm.sample(1000, return_inferencedata=True)
-
-        # KDAR
-        kdar_w = pm.Dirichlet(
-            "kdar_w", a=np.ones((len(data), 2)), dims=["data", "kdar"]
-        )
-
-        # Ionizing photon rate
-        log10_q = pm.Normal("log10_q", mu=48.5, sigma=0.75, dims=["data", "kdar"])
-
-        # Electron density
-        log10_n = pm.Normal("log10_n", mu=1.5, sigma=0.15, dims=["data", "kdar"])
-
-        # Stromgren radius
+        # Stromgren radius (pc)
         log10_Rs = pm.Deterministic(
             "log10_Rs",
-            log10_q / 3.0 - 2.0 * log10_n / 3.0 - 14.522,
-            dims=["data", "kdar"],
+            pt.log10(data["radius"] * 1000.0 * distance / 206265.0),
+            dims="kdar",
         )
 
-        # Radius
-        radius_mu = pm.Deterministic(
-            "radius_mu",
-            206265.0 * (10.0**log10_Rs / (1000.0 * distance)),
-            dims=["data", "kdar"],
-        )
-        radius = pm.NormalMixture(
-            "radius",
-            mu=radius_mu,
-            sigma=1.0,
-            w=kdar_w,
-            observed=data["radius"].to_numpy(),
-            dims="data",
+        # Electron density (cm-3)
+        log10_n = pm.Deterministic(
+            "log10_n",
+            0.5 * log10_em - 0.5 * log10_Rs - 0.5 * np.log10(2.0),
+            dims="kdar",
         )
 
-        # Emission measure
-        log10_em = pm.Deterministic(
-            "log10_em",
-            log10_Rs + 2.0 * log10_n + np.log10(2.0),
-            dims=["data", "kdar"],
+        # Ionizing photon rate (s-1)
+        _ = pm.Deterministic(
+            "log10_q", 3.0 * log10_Rs + 2.0 * log10_n + 3.0 * 14.522, dims="kdar"
         )
 
-        # line brightness
-        tau_line = pm.Deterministic(
-            "tau_line",
-            1.92e3
-            * te[:, None] ** -2.5
-            * 10.0**log10_em
-            / data["fwhm_kHz"].to_numpy()[:, None],
-            dims=["data", "kdar"],
+        # RRL optical depth
+        log10_tau_line = pm.Deterministic(
+            "log10_tau_line",
+            3.2833 - 2.5 * log10_te + log10_em - np.log10(data["fwhm_kHz"]),
+            dims="kdar",
         )
+
+        # Undiluted RRL brightness (mJy/beam)
         line_mu = (
             2.0
-            * data["beam_area"].to_numpy()[:, None]
+            * data["beam_area"]
             / 206265.0**2.0
             * (c.k_B / c.c**2.0).to("mJy MHz-2 K-1").value
-            * data["line_freq"].to_numpy()[:, None] ** 2.0
-            * te[:, None]
-            * (1.0 - np.exp(-tau_line))
-        )  # mJy/beam
+            * data["line_freq"] ** 2.0
+            * te
+            * (1.0 - np.exp(-(10.0**log10_tau_line)))
+        )
 
-        # beam dilution
-        source_area = np.pi * radius**2.0 / (4.0 * np.log(2.0))
-        beam_dilution = source_area / data["beam_area"].to_numpy()
+        # Beam dilution
+        source_area = np.pi * data["radius"] ** 2.0 / (4.0 * np.log(2.0))
+        beam_dilution = source_area / data["beam_area"]
         beam_dilution = pt.clip(beam_dilution, 0.0, 1.0)
+
+        # Diluted RRL brightness (mJy/beam)
         line_mu = pm.Deterministic(
             "line_mu",
-            line_mu * beam_dilution[:, None],
-            dims=["data", "kdar"],
+            line_mu * beam_dilution,
+            dims="kdar",
         )
         _ = pm.NormalMixture(
             "line",
             mu=line_mu,
-            sigma=data["e_line"].to_numpy()[:, None],
+            sigma=data["e_line"],
             w=kdar_w,
-            observed=data["line"].to_numpy(),
-            dims="data",
+            observed=data["line"],
         )
     return model
-
-
-"""
-        # distance (kpc)
-        distance_near, distance_far = utils.distance(data["glong"].to_numpy(), data["glat"].to_numpy(), Rgal)
-        distance = pm.Deterministic(
-            "distance",
-            pt.stack([distance_near, distance_far], axis=-1),
-            dims=["data", "kdar"],
-        )
-"""
