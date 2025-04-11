@@ -1,0 +1,14 @@
+name: physiokinematic
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - python
+  - pymc
+  - numpy
+  - astropy
+  - pandas
+  - matplotlib
+  - jupyter
+  - ipython
+
