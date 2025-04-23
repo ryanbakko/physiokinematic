@@ -18,11 +18,11 @@ my_model = model(data)
 with my_model:
     trace = pm.sample(
         init="auto",
-        chains=5,
-        cores=5,
+        chains=4,
+        cores=4,
         tune=1000,
         draws=1000,
-        target_accept=0.8,
+        target_accept=0.9,
     )
 
 # Save trace
